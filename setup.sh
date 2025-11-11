@@ -51,7 +51,7 @@ sleep 10
 
 max_retries=30
 retry_count=0
-while ! docker exec laravel-rag-ollama curl -s http://localhost:11434/api/tags > /dev/null; do
+while ! docker exec laravel-rag-ollama ollama list > /dev/null 2>&1; do
     retry_count=$((retry_count + 1))
     if [ $retry_count -ge $max_retries ]; then
         echo -e "${RED}Error: Ollama failed to start after ${max_retries} attempts${NC}"

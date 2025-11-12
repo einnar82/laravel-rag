@@ -397,7 +397,6 @@ Contributions welcome! Please:
 
 For issues and questions:
 - GitHub Issues: [Create an issue]
-- Documentation: See `/Users/rannieollit/Desktop/WebeeLabs/laravel-rag/claude.md`
 
 ## Acknowledgments
 

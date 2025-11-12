@@ -35,6 +35,13 @@ class MarkdownParser:
     # Priority order for heading levels to use for chunking
     HEADING_PRIORITY = ['H2', 'H3', 'H4']
 
+    # Files to exclude from indexing (navigation/meta files)
+    EXCLUDED_FILES = {
+        'documentation.md',  # Table of contents / navigation index
+        'readme.md',         # Repository readme
+        'license.md',        # MIT license text (not documentation)
+    }
+
     def __init__(self, version: str):
         """Initialize the parser.
 
@@ -139,7 +146,18 @@ class MarkdownParser:
             List of all DocSection objects from all files
         """
         all_sections = []
-        markdown_files = sorted(docs_dir.glob("*.md"))
+        all_markdown_files = sorted(docs_dir.glob("*.md"))
+
+        # Filter out excluded files
+        markdown_files = [
+            f for f in all_markdown_files
+            if f.name.lower() not in self.EXCLUDED_FILES
+        ]
+
+        excluded_count = len(all_markdown_files) - len(markdown_files)
+        if excluded_count > 0:
+            excluded_names = [f.name for f in all_markdown_files if f.name.lower() in self.EXCLUDED_FILES]
+            logger.debug(f"Excluding {excluded_count} non-documentation files: {', '.join(excluded_names)}")
 
         logger.info(f"Parsing {len(markdown_files)} Markdown files...")
 

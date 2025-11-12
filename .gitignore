@@ -17,7 +17,8 @@ build/
 # Data and cache
 /data/
 /chromadb/
-/docs/
+/sources/
+/models/
 /logs/
 *.log
 

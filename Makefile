@@ -1,100 +1,199 @@
-.PHONY: help setup start stop restart logs clean extract index query interactive stats check api-test
+.PHONY: help quickstart docker-start docker-stop docker-logs clean
+.PHONY: extract index query stats check disk-usage
+.PHONY: local-extract local-index local-query local-stats local-check
 
 help:
-	@echo "Laravel RAG System - Make Commands"
+	@echo "╔════════════════════════════════════════════════════════════╗"
+	@echo "║          Laravel RAG System - Make Commands               ║"
+	@echo "╚════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@echo "Setup & Management:"
-	@echo "  make setup       - Initial setup (Docker + pull models)"
-	@echo "  make start       - Start all services"
-	@echo "  make stop        - Stop all services"
-	@echo "  make restart     - Restart all services"
-	@echo "  make logs        - View logs"
-	@echo "  make clean       - Clean up (remove volumes and data)"
+	@echo "🚀 Quick Start:"
+	@echo "  make quickstart              Complete setup: extract + index docs"
 	@echo ""
-	@echo "Documentation:"
-	@echo "  make extract     - Extract Laravel docs from GitHub"
-	@echo "  make index       - Index docs into vector store"
-	@echo "  make reindex     - Force re-index documentation"
+	@echo "📦 Docker Commands:"
+	@echo "  make docker-start            Start all services"
+	@echo "  make docker-stop             Stop all services"
+	@echo "  make docker-logs             View container logs"
 	@echo ""
-	@echo "Querying:"
-	@echo "  make query Q='your question'  - Query documentation"
-	@echo "  make interactive              - Start interactive mode"
-	@echo "  make stats                    - Show statistics"
-	@echo "  make check                    - Check system status"
+	@echo "📚 Documentation Workflow:"
+	@echo "  make extract                 Extract Laravel docs from GitHub"
+	@echo "  make index                   Index docs into vector store"
+	@echo "  make query Q='...'           Query documentation"
+	@echo "  make stats                   Show database statistics"
+	@echo "  make check                   Check system status"
 	@echo ""
-	@echo "API:"
-	@echo "  make api-test    - Test API endpoints"
+	@echo "💻 Local Development (no Docker):"
+	@echo "  make local-extract           Extract docs locally"
+	@echo "  make local-index             Index docs locally"
+	@echo "  make local-query Q='...'     Query locally"
+	@echo "  make local-stats             Show stats locally"
+	@echo "  make local-check             Check status locally"
+	@echo ""
+	@echo "🛠️  Utilities:"
+	@echo "  make disk-usage              Show disk usage by folder"
+	@echo "  make clean                   Remove all data (models, db, cache)"
 	@echo ""
 
-setup:
-	@bash setup.sh
+# ============================================================================
+# Quick Start - Complete Workflow
+# ============================================================================
 
-start:
-	docker compose up -d
-	@echo "Services started. Waiting for health check..."
-	@sleep 5
+quickstart:
+	@echo "🚀 Starting Laravel RAG System..."
+	@echo ""
+	@echo "Step 1/5: Creating directories..."
+	@mkdir -p models chromadb sources logs data
+	@echo "✓ Directories created"
+	@echo ""
+	@echo "Step 2/5: Starting Docker services..."
+	@docker compose up -d
+	@echo "✓ Services started"
+	@echo ""
+	@echo "Step 3/5: Waiting for services to be ready..."
+	@sleep 10
+	@echo "✓ Services ready"
+	@echo ""
+	@echo "Step 4/5: Extracting Laravel v12 documentation..."
+	@docker compose exec -T rag-app python -m src.cli.main extract --version 12
+	@echo "✓ Documentation extracted"
+	@echo ""
+	@echo "Step 5/5: Indexing documentation (this may take a few minutes)..."
+	@docker compose exec -T rag-app python -m src.cli.main index --version 12
+	@echo "✓ Documentation indexed"
+	@echo ""
+	@echo "╔════════════════════════════════════════════════════════════╗"
+	@echo "║  ✅ Setup Complete! Your RAG system is ready to use       ║"
+	@echo "╚════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Try a query:"
+	@echo "  make query Q='How do I create an Eloquent model?'"
+	@echo ""
+	@echo "View statistics:"
+	@echo "  make stats"
+	@echo ""
+
+# ============================================================================
+# Docker Management
+# ============================================================================
+
+docker-start:
+	@echo "Starting Docker services..."
+	@mkdir -p models chromadb sources logs data
+	@docker compose up -d
+	@echo "✓ Services started"
+	@echo ""
 	@echo "API available at: http://localhost:8000"
+	@echo "Ollama available at: http://localhost:11434"
 
-stop:
-	docker compose down
+docker-stop:
+	@echo "Stopping Docker services..."
+	@docker compose down
+	@echo "✓ Services stopped"
 
-restart:
-	docker compose restart
+docker-logs:
+	@docker compose logs -f
 
-logs:
-	docker compose logs -f
-
-clean:
-	@echo "Warning: This will remove all data, including indexed documentation."
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		docker compose down -v; \
-		rm -rf chromadb/ data/ sources/ logs/; \
-		echo "Cleanup complete."; \
-	fi
+# ============================================================================
+# Documentation Workflow (Docker)
+# ============================================================================
 
 extract:
-	docker compose exec rag-app python -m src.cli.main extract
+	@echo "Extracting Laravel documentation..."
+	@docker compose exec rag-app python -m src.cli.main extract --version 12
+	@echo "✓ Extraction complete"
 
 index:
-	docker compose exec rag-app python -m src.cli.main index
-
-reindex:
-	docker compose exec rag-app python -m src.cli.main index --force
+	@echo "Indexing documentation into vector store..."
+	@docker compose exec rag-app python -m src.cli.main index --version 12
+	@echo "✓ Indexing complete"
 
 query:
 	@if [ -z "$(Q)" ]; then \
 		echo "Usage: make query Q='your question'"; \
+		echo "Example: make query Q='How do I create a model?'"; \
 		exit 1; \
 	fi
-	docker compose exec rag-app python -m src.cli.main query "$(Q)" --show-sources
-
-interactive:
-	docker compose exec rag-app python -m src.cli.main interactive
+	@docker compose exec rag-app python -m src.cli.main query "$(Q)" --show-sources
 
 stats:
-	docker compose exec rag-app python -m src.cli.main stats
+	@docker compose exec rag-app python -m src.cli.main stats
 
 check:
-	docker compose exec rag-app python -m src.cli.main check
+	@docker compose exec rag-app python -m src.cli.main check
 
-api-test:
-	@echo "Testing API endpoints..."
+# ============================================================================
+# Local Development (No Docker)
+# ============================================================================
+
+local-extract:
+	@if [ ! -d ".venv" ]; then \
+		echo "Virtual environment not found. Creating..."; \
+		python3 -m venv .venv; \
+		. .venv/bin/activate && pip install -q -r requirements.txt; \
+	fi
+	@echo "Extracting Laravel documentation..."
+	@. .venv/bin/activate && python -m src.cli.main extract --version 12
+	@echo "✓ Extraction complete"
+
+local-index:
+	@if [ ! -d ".venv" ]; then \
+		echo "Virtual environment not found. Run 'make local-extract' first."; \
+		exit 1; \
+	fi
+	@echo "Indexing documentation into vector store..."
+	@. .venv/bin/activate && python -m src.cli.main index --version 12
+	@echo "✓ Indexing complete"
+
+local-query:
+	@if [ -z "$(Q)" ]; then \
+		echo "Usage: make local-query Q='your question'"; \
+		echo "Example: make local-query Q='How do I create a model?'"; \
+		exit 1; \
+	fi
+	@. .venv/bin/activate && python -m src.cli.main query "$(Q)" --show-sources
+
+local-stats:
+	@. .venv/bin/activate && python -m src.cli.main stats
+
+local-check:
+	@. .venv/bin/activate && python -m src.cli.main check
+
+# ============================================================================
+# Utilities
+# ============================================================================
+
+disk-usage:
+	@echo "╔════════════════════════════════════════════════════════════╗"
+	@echo "║              Disk Usage by Folder                          ║"
+	@echo "╚════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@echo "1. Health check:"
-	@curl -s http://localhost:8000/health | python -m json.tool
+	@printf "%-15s %s\n" "Folder" "Size"
+	@printf "%-15s %s\n" "──────" "────"
+	@du -sh models 2>/dev/null | awk '{printf "%-15s %s\n", "models/", $$1}' || printf "%-15s %s\n" "models/" "0"
+	@du -sh chromadb 2>/dev/null | awk '{printf "%-15s %s\n", "chromadb/", $$1}' || printf "%-15s %s\n" "chromadb/" "0"
+	@du -sh sources 2>/dev/null | awk '{printf "%-15s %s\n", "sources/", $$1}' || printf "%-15s %s\n" "sources/" "0"
+	@du -sh logs 2>/dev/null | awk '{printf "%-15s %s\n", "logs/", $$1}' || printf "%-15s %s\n" "logs/" "0"
+	@du -sh data 2>/dev/null | awk '{printf "%-15s %s\n", "data/", $$1}' || printf "%-15s %s\n" "data/" "0"
 	@echo ""
-	@echo "2. Stats:"
-	@curl -s http://localhost:8000/stats | python -m json.tool
+	@printf "%-15s %s\n" "Total:" "$$(du -sh . 2>/dev/null | awk '{print $$1}')"
+
+clean:
+	@echo "⚠️  Warning: This will remove all data, including:"
+	@echo "  - Ollama models (~2.5 GB)"
+	@echo "  - Vector database"
+	@echo "  - Documentation cache"
+	@echo "  - Logs"
 	@echo ""
-	@echo "3. Versions:"
-	@curl -s http://localhost:8000/versions | python -m json.tool
-	@echo ""
-	@echo "4. Sample query:"
-	@curl -s -X POST http://localhost:8000/query \
-		-H "Content-Type: application/json" \
-		-d '{"question": "How do I create a model?", "include_sources": true}' \
-		| python -m json.tool
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "Stopping containers..."; \
+		docker compose down; \
+		echo "Removing data directories..."; \
+		rm -rf chromadb/ data/ sources/ logs/ models/; \
+		echo "✓ Cleanup complete"; \
+	else \
+		echo "Cancelled."; \
+	fi
 
 .DEFAULT_GOAL := help

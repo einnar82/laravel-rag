@@ -35,13 +35,15 @@ class VectorStore:
         self.collection_name = collection_name or settings.chroma_collection_name
         self.embeddings = embeddings or OllamaEmbeddings()
 
-        # Initialize ChromaDB client with telemetry disabled
-        chroma_settings = ChromaSettings(
-            persist_directory=self.persist_dir,
-            anonymized_telemetry=False,
-            allow_reset=True,
+        # Initialize ChromaDB client with persistence
+        # Use PersistentClient for automatic persistence in ChromaDB 0.4.x
+        self.client = chromadb.PersistentClient(
+            path=self.persist_dir,
+            settings=ChromaSettings(
+                anonymized_telemetry=False,
+                allow_reset=True,
+            )
         )
-        self.client = chromadb.Client(chroma_settings)
 
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
@@ -123,6 +125,7 @@ class VectorStore:
                 logger.error(f"Error adding batch: {e}")
                 continue
 
+        # PersistentClient automatically persists data to disk
         logger.info(f"Successfully added {added_count} sections to vector store")
         return added_count
 

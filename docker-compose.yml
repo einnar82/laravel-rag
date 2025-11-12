@@ -5,7 +5,7 @@ services:
     container_name: laravel-rag-ollama
     platform: linux/arm64  # M1 Mac compatibility
     volumes:
-      - ollama_data:/root/.ollama
+      - ./models:/root/.ollama  # Mount models to local project folder
     ports:
       - "11434:11434"
     networks:
@@ -40,8 +40,8 @@ services:
       - ./src:/app/src
       - ./config:/app/config
       - ./data:/app/data
-      - chromadb_data:/app/chromadb
-      - sources_cache:/app/sources
+      - ./chromadb:/app/chromadb  # Mount ChromaDB to local project folder
+      - ./sources:/app/sources    # Mount docs cache to local project folder
       - ./logs:/app/logs
     environment:
       - OLLAMA_HOST=http://ollama:11434
@@ -66,14 +66,6 @@ services:
           memory: 2G
         reservations:
           memory: 1G
-
-volumes:
-  ollama_data:
-    driver: local
-  chromadb_data:
-    driver: local
-  sources_cache:
-    driver: local
 
 networks:
   rag-network:

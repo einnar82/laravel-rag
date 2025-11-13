@@ -1,6 +1,7 @@
 .PHONY: help quickstart docker-start docker-stop docker-logs clean
 .PHONY: extract index query stats check disk-usage
 .PHONY: local-extract local-index local-query local-stats local-check
+.PHONY: analyze-chunks compare-chunks
 
 help:
 	@echo "╔════════════════════════════════════════════════════════════╗"
@@ -31,6 +32,8 @@ help:
 	@echo ""
 	@echo "🛠️  Utilities:"
 	@echo "  make disk-usage              Show disk usage by folder"
+	@echo "  make analyze-chunks          Analyze chunking strategy"
+	@echo "  make compare-chunks          Compare anchor vs adaptive strategies"
 	@echo "  make clean                   Remove all data (models, db, cache)"
 	@echo ""
 
@@ -176,6 +179,24 @@ disk-usage:
 	@du -sh data 2>/dev/null | awk '{printf "%-15s %s\n", "data/", $$1}' || printf "%-15s %s\n" "data/" "0"
 	@echo ""
 	@printf "%-15s %s\n" "Total:" "$$(du -sh . 2>/dev/null | awk '{print $$1}')"
+
+analyze-chunks:
+	@if [ ! -d ".venv" ]; then \
+		echo "Virtual environment not found. Creating..."; \
+		python3 -m venv .venv; \
+		. .venv/bin/activate && pip install -q -r requirements.txt; \
+	fi
+	@echo "Analyzing chunking strategy..."
+	@. .venv/bin/activate && python analyze_chunks.py $(if $(STRATEGY),--strategy $(STRATEGY),) $(if $(MAX),--max-chunk-size $(MAX),) $(if $(MIN),--min-chunk-size $(MIN),) $(if $(OVERLAP),--chunk-overlap $(OVERLAP),)
+
+compare-chunks:
+	@if [ ! -d ".venv" ]; then \
+		echo "Virtual environment not found. Creating..."; \
+		python3 -m venv .venv; \
+		. .venv/bin/activate && pip install -q -r requirements.txt; \
+	fi
+	@echo "Comparing chunking strategies..."
+	@. .venv/bin/activate && python analyze_chunks.py --strategy compare
 
 clean:
 	@echo "⚠️  Warning: This will remove all data, including:"

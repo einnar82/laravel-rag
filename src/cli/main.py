@@ -86,12 +86,45 @@ def extract(version: str, force: bool):
     type=int,
     help=f"Number of parallel workers (default: {settings.max_workers})",
 )
-def index(version: str, force: bool, batch_size: int, parallel: bool, workers: int):
+@click.option(
+    "--chunk-strategy",
+    type=click.Choice(["anchor", "adaptive"]),
+    default=None,
+    help=f"Chunking strategy (default: {settings.chunk_strategy})",
+)
+@click.option(
+    "--max-chunk-size",
+    default=None,
+    type=int,
+    help=f"Maximum chunk size in characters (default: {settings.max_chunk_size})",
+)
+@click.option(
+    "--chunk-overlap",
+    default=None,
+    type=int,
+    help=f"Chunk overlap in characters (default: {settings.chunk_overlap})",
+)
+def index(
+    version: str,
+    force: bool,
+    batch_size: int,
+    parallel: bool,
+    workers: int,
+    chunk_strategy: str,
+    max_chunk_size: int,
+    chunk_overlap: int,
+):
     """Index Laravel documentation into vector store with parallel processing."""
     batch_size = batch_size or settings.batch_size
     workers = workers or settings.max_workers
+    chunk_strategy = chunk_strategy or settings.chunk_strategy
+    max_chunk_size = max_chunk_size or settings.max_chunk_size
+    chunk_overlap = chunk_overlap or settings.chunk_overlap
 
     console.print(f"[bold blue]Indexing Laravel v{version} documentation...[/bold blue]")
+    console.print(f"[cyan]Chunk strategy: {chunk_strategy}[/cyan]")
+    if chunk_strategy == "adaptive":
+        console.print(f"[cyan]Max chunk size: {max_chunk_size} chars, Overlap: {chunk_overlap} chars[/cyan]")
     if parallel:
         console.print(f"[cyan]Parallel processing: enabled ({workers} workers)[/cyan]")
     else:
@@ -123,7 +156,12 @@ def index(version: str, force: bool, batch_size: int, parallel: bool, workers: i
             console.print("[red]Documentation not found. Run 'extract' first.[/red]")
             raise click.Abort()
 
-        parser = MarkdownParser(version=version)
+        parser = MarkdownParser(
+            version=version,
+            chunk_strategy=chunk_strategy,
+            max_chunk_size=max_chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
         sections = parser.parse_directory(docs_dir)
 
         console.print(f"[green]Parsed {len(sections)} sections[/green]")

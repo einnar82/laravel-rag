@@ -8,7 +8,7 @@ A production-ready Retrieval-Augmented Generation (RAG) system for querying Lara
 - **Efficient Embeddings**: nomic-embed-text (768 dimensions) optimized for retrieval
 - **Persistent Vector Store**: ChromaDB with disk persistence
 - **Version-Aware**: Support for multiple Laravel versions with metadata tracking
-- **Smart Chunking**: H2-based section chunking preserves context and code examples
+- **Smart Chunking**: Adaptive chunking with configurable size limits and overlap
 - **Multiple Interfaces**: CLI, Interactive mode, and REST API
 - **Docker-Based**: Fully containerized with M1 Mac support
 - **Production Ready**: Comprehensive logging, error handling, and monitoring

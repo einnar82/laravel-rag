@@ -36,8 +36,14 @@ class Settings(BaseSettings):
 
     # RAG Configuration
     top_k: int = Field(default=5, ge=1, le=20, description="Number of top results to retrieve")
-    chunk_size: int = Field(default=1000, ge=100, le=5000, description="Text chunk size")
-    chunk_overlap: int = Field(default=200, ge=0, le=1000, description="Chunk overlap size")
+
+    # Chunk Size Optimization Parameters
+    chunk_strategy: str = Field(default="adaptive", description="Chunking strategy: 'anchor' (H2-based only) or 'adaptive' (smart splitting)")
+    max_chunk_size: int = Field(default=2000, ge=500, le=10000, description="Maximum characters per chunk (for adaptive strategy)")
+    min_chunk_size: int = Field(default=200, ge=50, le=2000, description="Minimum characters per chunk (for adaptive strategy)")
+    chunk_overlap: int = Field(default=200, ge=0, le=1000, description="Overlap between split chunks (for adaptive strategy)")
+    preserve_code_blocks: bool = Field(default=True, description="Try to keep code blocks intact when splitting")
+
     response_timeout: int = Field(default=30, ge=5, le=120, description="Response timeout in seconds")
 
     # Indexing Configuration

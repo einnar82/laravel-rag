@@ -189,7 +189,7 @@ LOG_LEVEL=INFO
 
 ### System Configuration
 
-Edit `/Users/rannieollit/Desktop/WebeeLabs/laravel-rag/config/system.yaml` for advanced settings:
+Edit `config/system.yaml` for advanced settings:
 - Model parameters
 - Chunking strategy
 - Performance tuning
@@ -274,7 +274,7 @@ docker-compose exec rag-app python -m src.cli.main query \
 
 ### Custom Chunking
 
-Modify `/Users/rannieollit/Desktop/WebeeLabs/laravel-rag/src/extraction/markdown_parser.py` to customize chunking strategy.
+Modify `src/extraction/markdown_parser.py` to customize chunking strategy.
 
 ### Monitoring
 
@@ -286,7 +286,7 @@ docker-compose logs -f ollama      # Ollama only
 ```
 
 Log files:
-- Application: `/Users/rannieollit/Desktop/WebeeLabs/laravel-rag/logs/laravel-rag.log`
+- Application: `logs/laravel-rag.log`
 - Docker: `docker-compose logs`
 
 ### Troubleshooting

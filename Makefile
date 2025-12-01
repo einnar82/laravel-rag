@@ -135,6 +135,15 @@ check:
 validate:
 	@docker compose exec rag-app python -m src.cli.main validate
 
+queue-status: ## Check Redis queue status
+	@docker compose exec rag-app python -m src.cli.main queue-status
+
+queue-clear-failed: ## Clear failed jobs from queue
+	@docker compose exec rag-app python -m src.cli.main queue-clear --clear-failed
+
+queue-clear-finished: ## Clear finished jobs from queue
+	@docker compose exec rag-app python -m src.cli.main queue-clear --clear-finished
+
 # ============================================================================
 # Local Development (No Docker)
 # ============================================================================

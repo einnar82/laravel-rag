@@ -26,6 +26,10 @@ httpx>=0.25.2,<0.26.0  # Compatible with ollama 0.1.6 requirement
 aiofiles==23.2.1
 requests==2.31.0
 
+# Task Queue and Caching
+redis==5.0.1
+rq==1.15.1
+
 # Utilities
 python-dotenv==1.0.0
 pyyaml==6.0.1

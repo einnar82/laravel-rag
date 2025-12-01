@@ -18,6 +18,7 @@ from src.indexing.vector_store import VectorStore
 from src.retrieval.rag_chain import RAGChain
 from src.utils.cache import get_cache_stats
 from src.utils.logger import app_logger as logger
+from src.workers.task_queue import IndexingQueue
 
 console = Console()
 
@@ -101,6 +102,16 @@ def extract(version: str, force: bool):
     type=int,
     help=f"Chunk overlap in characters (default: {settings.chunk_overlap})",
 )
+@click.option(
+    "--use-queue/--no-queue",
+    default=None,
+    help=f"Use Redis queue for async indexing (default: {settings.queue_indexing})",
+)
+@click.option(
+    "--wait",
+    is_flag=True,
+    help="Wait for queued jobs to complete (only with --use-queue)",
+)
 def index(
     version: str,
     force: bool,
@@ -109,8 +120,11 @@ def index(
     chunk_strategy: str,
     max_chunk_size: int,
     chunk_overlap: int,
+    use_queue: bool,
+    wait: bool,
 ):
-    """Index Laravel documentation into vector store with concurrent processing."""
+    """Index Laravel documentation into vector store with concurrent/queued processing."""
+    use_queue = use_queue if use_queue is not None else settings.queue_indexing
     batch_size = batch_size or settings.batch_size
     workers = workers or settings.max_workers
     chunk_strategy = chunk_strategy or settings.chunk_strategy
@@ -170,26 +184,64 @@ def index(
 
         console.print(f"[green]Parsed {len(sections)} sections[/green]")
 
-        # Index sections with concurrent processing
-        console.print("[yellow]Generating embeddings and indexing...[/yellow]")
-        console.print(f"[dim]Batch size: {batch_size}, Workers: {workers}[/dim]")
-
         import time
         start_time = time.time()
 
-        with console.status("[bold green]Indexing in progress..."):
-            added_count = vector_store.add_sections(
-                sections,
-                batch_size=batch_size,
-                parallel=True,
-                max_workers=workers
-            )
+        # Choose indexing method
+        if use_queue and settings.redis_enabled:
+            # Queue-based async indexing
+            console.print("[yellow]Enqueuing sections for async indexing...[/yellow]")
+            console.print(f"[cyan]Queue: {settings.redis_queue_name}, Batch size: {settings.queue_batch_size}[/cyan]")
+            
+            try:
+                queue = IndexingQueue()
+                if not queue.is_healthy():
+                    console.print("[red]Redis is not available. Falling back to direct indexing.[/red]")
+                    use_queue = False
+                else:
+                    jobs = queue.enqueue_indexing_batch(sections, batch_size=settings.queue_batch_size)
+                    console.print(f"[green]Enqueued {len(jobs)} jobs for processing[/green]")
+                    console.print(f"[cyan]Jobs will be processed by background workers[/cyan]")
+                    
+                    if wait:
+                        console.print("\n[yellow]Waiting for jobs to complete...[/yellow]")
+                        with console.status("[bold green]Processing queued jobs..."):
+                            result = queue.wait_for_jobs(jobs)
+                        
+                        elapsed = time.time() - start_time
+                        rate = result['total_processed'] / elapsed if elapsed > 0 else 0
+                        
+                        console.print(f"\n[green]✓ Indexing complete![/green]")
+                        console.print(f"[green]Processed: {result['total_processed']} sections[/green]")
+                        console.print(f"[green]Completed jobs: {result['completed']}, Failed: {result['failed']}[/green]")
+                        console.print(f"[cyan]Time: {elapsed:.1f}s, Rate: {rate:.1f} sections/second[/cyan]")
+                    else:
+                        console.print("\n[cyan]Jobs queued. Check progress with: make queue-status[/cyan]")
+                        console.print("[dim]Run with --wait to wait for completion[/dim]")
+                        return  # Exit early if not waiting
+                        
+            except Exception as e:
+                console.print(f"[red]Queue error: {e}. Falling back to direct indexing.[/red]")
+                use_queue = False
+        
+        if not use_queue:
+            # Direct concurrent indexing
+            console.print("[yellow]Generating embeddings and indexing (direct mode)...[/yellow]")
+            console.print(f"[dim]Batch size: {batch_size}, Workers: {workers}[/dim]")
 
-        elapsed = time.time() - start_time
-        rate = added_count / elapsed if elapsed > 0 else 0
+            with console.status("[bold green]Indexing in progress..."):
+                added_count = vector_store.add_sections(
+                    sections,
+                    batch_size=batch_size,
+                    parallel=True,
+                    max_workers=workers
+                )
 
-        console.print(f"[green]Successfully indexed {added_count} sections in {elapsed:.1f}s[/green]")
-        console.print(f"[cyan]Indexing rate: {rate:.1f} sections/second[/cyan]")
+            elapsed = time.time() - start_time
+            rate = added_count / elapsed if elapsed > 0 else 0
+
+            console.print(f"[green]Successfully indexed {added_count} sections in {elapsed:.1f}s[/green]")
+            console.print(f"[cyan]Indexing rate: {rate:.1f} sections/second[/cyan]")
 
         # Show stats
         stats = vector_store.get_stats()
@@ -498,6 +550,78 @@ def validate(version: str):
         console.print(f"[red]Error: {e}[/red]")
         logger.error(f"Validation failed: {e}")
         raise click.Abort()
+
+
+@cli.command()
+def queue_status():
+    """Check Redis queue status and statistics."""
+    console.print("[bold blue]Queue Status[/bold blue]\n")
+
+    try:
+        queue = IndexingQueue()
+        
+        if not queue.is_healthy():
+            console.print("[red]✗ Redis connection failed[/red]")
+            return
+
+        console.print("[green]✓ Redis connection healthy[/green]\n")
+
+        # Get queue info
+        info = queue.get_queue_info()
+        
+        # Create status table
+        table = Table(title="Queue Statistics")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Count", style="green")
+        
+        table.add_row("Queue Name", info.get('name', 'N/A'))
+        table.add_row("Pending Jobs", str(info.get('count', 0)))
+        table.add_row("Active Workers", str(info.get('workers', 0)))
+        table.add_row("Running Jobs", str(info.get('started_jobs', 0)))
+        table.add_row("Completed Jobs", str(info.get('finished_jobs', 0)))
+        table.add_row("Failed Jobs", str(info.get('failed_jobs', 0)))
+        table.add_row("Scheduled Jobs", str(info.get('scheduled_jobs', 0)))
+        
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        logger.error(f"Queue status check failed: {e}")
+
+
+@cli.command()
+@click.option(
+    "--clear-failed",
+    is_flag=True,
+    help="Clear failed jobs",
+)
+@click.option(
+    "--clear-finished",
+    is_flag=True,
+    help="Clear finished jobs",
+)
+def queue_clear(clear_failed: bool, clear_finished: bool):
+    """Clear jobs from the queue."""
+    if not clear_failed and not clear_finished:
+        console.print("[yellow]Specify --clear-failed or --clear-finished[/yellow]")
+        return
+
+    try:
+        queue = IndexingQueue()
+        
+        if clear_failed:
+            console.print("[yellow]Clearing failed jobs...[/yellow]")
+            queue.clear_failed_jobs()
+            console.print("[green]✓ Failed jobs cleared[/green]")
+        
+        if clear_finished:
+            console.print("[yellow]Clearing finished jobs...[/yellow]")
+            queue.clear_finished_jobs()
+            console.print("[green]✓ Finished jobs cleared[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        logger.error(f"Queue clear failed: {e}")
 
 
 if __name__ == "__main__":

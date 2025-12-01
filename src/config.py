@@ -17,6 +17,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Redis Configuration
+    redis_url: str = Field(default="redis://localhost:6379/0", description="Redis URL for task queue and caching")
+    redis_enabled: bool = Field(default=True, description="Enable Redis queue for indexing")
+    redis_queue_name: str = Field(default="laravel-rag-indexing", description="Redis queue name")
+    redis_queue_timeout: int = Field(default=600, ge=60, description="Queue job timeout in seconds")
+    redis_result_ttl: int = Field(default=3600, ge=60, description="Queue result TTL in seconds")
+    
     # Ollama Configuration
     ollama_host: str = Field(default="http://localhost:11434", description="Ollama API host")
     llm_model: str = Field(default="gemma:2b", description="LLM model name")
@@ -51,6 +58,8 @@ class Settings(BaseSettings):
     parallel_indexing: bool = Field(default=True, description="Enable parallel processing for indexing")
     max_workers: int = Field(default=8, ge=1, le=16, description="Maximum parallel workers for embeddings")
     batch_size: int = Field(default=50, ge=1, le=200, description="Batch size for indexing")
+    queue_indexing: bool = Field(default=True, description="Use Redis queue for indexing (async processing)")
+    queue_batch_size: int = Field(default=50, ge=10, le=100, description="Sections per queue job")
     
     # Cache Configuration
     cache_enabled: bool = Field(default=True, description="Enable caching")

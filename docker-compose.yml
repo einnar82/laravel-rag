@@ -1,4 +1,27 @@
 services:
+  # Redis for task queue and caching
+  redis:
+    image: redis:7-alpine
+    container_name: laravel-rag-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
   # Ollama service for local LLM inference
   ollama:
     image: ollama/ollama:latest
@@ -36,6 +59,8 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./src:/app/src
       - ./config:/app/config
@@ -45,6 +70,7 @@ services:
       - ./logs:/app/logs
     environment:
       - OLLAMA_HOST=http://ollama:11434
+      - REDIS_URL=redis://redis:6379/0
       - CHROMA_PERSIST_DIR=/app/chromadb
       - DOCS_CACHE_DIR=/app/sources
       - LOG_LEVEL=INFO
@@ -66,6 +92,46 @@ services:
           memory: 4G
         reservations:
           memory: 2G
+
+  # RQ Worker for background task processing
+  rag-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: laravel-rag-worker
+    platform: linux/arm64
+    depends_on:
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./chromadb:/app/chromadb
+      - ./sources:/app/sources
+      - ./logs:/app/logs
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_PERSIST_DIR=/app/chromadb
+      - DOCS_CACHE_DIR=/app/sources
+      - LOG_LEVEL=INFO
+      - LARAVEL_VERSION=12
+      - EMBEDDING_MODEL=nomic-embed-text
+      - LLM_MODEL=gemma:2b
+      - ANONYMIZED_TELEMETRY=False
+      - POSTHOG_DISABLED=1
+    networks:
+      - rag-network
+    command: ["python", "-m", "src.workers.rq_worker"]
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 
 networks:
   rag-network:

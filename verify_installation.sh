@@ -49,6 +49,8 @@ test -f Dockerfile && check "Dockerfile exists" || check "Dockerfile exists"
 test -f requirements.txt && check "requirements.txt exists" || check "requirements.txt exists"
 test -f Makefile && check "Makefile exists" || check "Makefile exists"
 test -f .env.example && check ".env.example exists" || check ".env.example exists"
+test -f setup.sh && check "setup.sh exists" || check "setup.sh exists"
+test -f verify_installation.sh && check "verify_installation.sh exists" || check "verify_installation.sh exists"
 
 # Check documentation
 test -f README.md && check "README.md exists" || check "README.md exists"
@@ -67,9 +69,12 @@ test -f src/extraction/docs_fetcher.py && check "docs_fetcher.py exists" || chec
 test -f src/extraction/markdown_parser.py && check "markdown_parser.py exists" || check "markdown_parser.py exists"
 test -f src/indexing/embeddings.py && check "embeddings.py exists" || check "embeddings.py exists"
 test -f src/indexing/vector_store.py && check "vector_store.py exists" || check "vector_store.py exists"
+test -f src/indexing/validator.py && check "validator.py exists" || check "validator.py exists"
 test -f src/retrieval/rag_chain.py && check "rag_chain.py exists" || check "rag_chain.py exists"
 test -f src/api/main.py && check "api/main.py exists" || check "api/main.py exists"
 test -f src/cli/main.py && check "cli/main.py exists" || check "cli/main.py exists"
+test -f src/utils/cache.py && check "cache.py exists" || check "cache.py exists"
+test -f src/utils/logger.py && check "logger.py exists" || check "logger.py exists"
 
 echo ""
 echo -e "${BLUE}3. Checking Dependencies${NC}"
@@ -107,6 +112,9 @@ grep -q "LARAVEL_VERSION" .env.example && check "LARAVEL_VERSION in .env.example
 
 # Check system.yaml
 test -f config/system.yaml && check "config/system.yaml exists" || check "config/system.yaml exists"
+grep -q "min_similarity_threshold" config/system.yaml && check "min_similarity_threshold in system.yaml" || check "min_similarity_threshold in system.yaml"
+grep -q "cache" config/system.yaml && check "cache configuration in system.yaml" || check "cache configuration in system.yaml"
+grep -q "hnsw" config/system.yaml && check "HNSW configuration in system.yaml" || check "HNSW configuration in system.yaml"
 
 echo ""
 echo -e "${BLUE}6. Checking Documentation Quality${NC}"
@@ -118,8 +126,10 @@ grep -q "Installation" README.md && check "README has Installation section" || c
 grep -q "Usage" README.md && check "README has Usage section" || check "README has Usage section"
 
 # Check API documentation
-grep -q "POST /query" API.md && check "API docs have /query endpoint" || check "API docs have /query endpoint"
-grep -q "GET /search" API.md && check "API docs have /search endpoint" || check "API docs have /search endpoint"
+grep -q "POST /query" documentation/API.md && check "API docs have /query endpoint" || check "API docs have /query endpoint"
+grep -q "GET /search" documentation/API.md && check "API docs have /search endpoint" || check "API docs have /search endpoint"
+grep -q "GET /validate-index" documentation/API.md && check "API docs have /validate-index endpoint" || check "API docs have /validate-index endpoint"
+grep -q "GET /cache-stats" documentation/API.md && check "API docs have /cache-stats endpoint" || check "API docs have /cache-stats endpoint"
 
 echo ""
 echo -e "${BLUE}7. Checking Scripts${NC}"
@@ -133,6 +143,7 @@ grep -q "^setup:" Makefile && check "Makefile has setup target" || check "Makefi
 grep -q "^extract:" Makefile && check "Makefile has extract target" || check "Makefile has extract target"
 grep -q "^index:" Makefile && check "Makefile has index target" || check "Makefile has index target"
 grep -q "^query:" Makefile && check "Makefile has query target" || check "Makefile has query target"
+grep -q "^validate:" Makefile && check "Makefile has validate target" || check "Makefile has validate target"
 
 echo ""
 echo -e "${BLUE}8. Checking Tests${NC}"

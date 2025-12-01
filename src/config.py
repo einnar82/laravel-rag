@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # RAG Configuration
     top_k: int = Field(default=5, ge=1, le=20, description="Number of top results to retrieve")
+    min_similarity_threshold: float = Field(default=0.5, ge=0.0, le=1.0, description="Minimum similarity score to generate answer")
 
     # Chunk Size Optimization Parameters
     chunk_strategy: str = Field(default="adaptive", description="Chunking strategy: 'anchor' (H2-based only) or 'adaptive' (smart splitting)")
@@ -50,6 +51,19 @@ class Settings(BaseSettings):
     parallel_indexing: bool = Field(default=True, description="Enable parallel processing for indexing")
     max_workers: int = Field(default=8, ge=1, le=16, description="Maximum parallel workers for embeddings")
     batch_size: int = Field(default=50, ge=1, le=200, description="Batch size for indexing")
+    
+    # Cache Configuration
+    cache_enabled: bool = Field(default=True, description="Enable caching")
+    cache_ttl: int = Field(default=3600, ge=60, description="Cache TTL in seconds")
+    cache_max_size: int = Field(default=1000, ge=100, description="Maximum cache size")
+    embedding_cache_enabled: bool = Field(default=True, description="Enable embedding cache")
+    retrieval_cache_enabled: bool = Field(default=True, description="Enable retrieval result cache")
+    
+    # ChromaDB Performance Settings
+    chroma_hnsw_M: int = Field(default=16, ge=4, le=64, description="HNSW M parameter")
+    chroma_hnsw_ef_construction: int = Field(default=200, ge=50, le=500, description="HNSW ef_construction parameter")
+    chroma_hnsw_ef_search: int = Field(default=50, ge=10, le=200, description="HNSW ef_search parameter")
+    chroma_metadata_indexing: bool = Field(default=True, description="Enable metadata indexing")
 
     # Logging
     log_level: str = Field(default="INFO", description="Logging level")

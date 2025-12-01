@@ -13,8 +13,10 @@ from src.config import settings
 from src.extraction.docs_fetcher import DocsFetcher
 from src.extraction.markdown_parser import MarkdownParser
 from src.indexing.embeddings import OllamaEmbeddings
+from src.indexing.validator import IndexValidator
 from src.indexing.vector_store import VectorStore
 from src.retrieval.rag_chain import RAGChain
+from src.utils.cache import get_cache_stats
 from src.utils.logger import app_logger as logger
 
 console = Console()
@@ -76,15 +78,10 @@ def extract(version: str, force: bool):
     help=f"Batch size for embedding generation (default: {settings.batch_size})",
 )
 @click.option(
-    "--parallel/--no-parallel",
-    default=True,
-    help="Enable/disable parallel processing (default: enabled)",
-)
-@click.option(
     "--workers",
     default=None,
     type=int,
-    help=f"Number of parallel workers (default: {settings.max_workers})",
+    help=f"Number of concurrent workers (default: {settings.max_workers})",
 )
 @click.option(
     "--chunk-strategy",
@@ -108,13 +105,12 @@ def index(
     version: str,
     force: bool,
     batch_size: int,
-    parallel: bool,
     workers: int,
     chunk_strategy: str,
     max_chunk_size: int,
     chunk_overlap: int,
 ):
-    """Index Laravel documentation into vector store with parallel processing."""
+    """Index Laravel documentation into vector store with concurrent processing."""
     batch_size = batch_size or settings.batch_size
     workers = workers or settings.max_workers
     chunk_strategy = chunk_strategy or settings.chunk_strategy
@@ -125,10 +121,8 @@ def index(
     console.print(f"[cyan]Chunk strategy: {chunk_strategy}[/cyan]")
     if chunk_strategy == "adaptive":
         console.print(f"[cyan]Max chunk size: {max_chunk_size} chars, Overlap: {chunk_overlap} chars[/cyan]")
-    if parallel:
-        console.print(f"[cyan]Parallel processing: enabled ({workers} workers)[/cyan]")
-    else:
-        console.print(f"[cyan]Parallel processing: disabled (sequential)[/cyan]")
+    console.print(f"[cyan]Concurrent processing: {workers} workers[/cyan]")
+    console.print(f"[cyan]Batch size: {batch_size}[/cyan]")
 
     try:
         # Check if models are available
@@ -144,8 +138,18 @@ def index(
 
         # Clear existing data if force
         if force:
-            console.print(f"[yellow]Clearing existing data for version {version}...[/yellow]")
-            vector_store.clear_version(version)
+            # Check if collection needs to be recreated with cosine distance
+            try:
+                existing_metadata = vector_store.collection.metadata
+                if existing_metadata.get("hnsw:space") != "cosine":
+                    console.print(f"[yellow]Recreating collection with cosine distance...[/yellow]")
+                    vector_store.recreate_collection()
+                else:
+                    console.print(f"[yellow]Clearing existing data for version {version}...[/yellow]")
+                    vector_store.clear_version(version)
+            except Exception:
+                console.print(f"[yellow]Clearing existing data for version {version}...[/yellow]")
+                vector_store.clear_version(version)
 
         # Parse documentation
         console.print("[yellow]Parsing documentation files...[/yellow]")
@@ -162,13 +166,13 @@ def index(
             max_chunk_size=max_chunk_size,
             chunk_overlap=chunk_overlap,
         )
-        sections = parser.parse_directory(docs_dir)
+        sections = parser.parse_directory(docs_dir, max_workers=workers)
 
         console.print(f"[green]Parsed {len(sections)} sections[/green]")
 
-        # Index sections with parallel processing
+        # Index sections with concurrent processing
         console.print("[yellow]Generating embeddings and indexing...[/yellow]")
-        console.print(f"[dim]Batch size: {batch_size}, Workers: {workers if parallel else 'sequential'}[/dim]")
+        console.print(f"[dim]Batch size: {batch_size}, Workers: {workers}[/dim]")
 
         import time
         start_time = time.time()
@@ -177,8 +181,8 @@ def index(
             added_count = vector_store.add_sections(
                 sections,
                 batch_size=batch_size,
-                parallel=parallel,
-                max_workers=workers if parallel else None
+                parallel=True,
+                max_workers=workers
             )
 
         elapsed = time.time() - start_time
@@ -190,6 +194,20 @@ def index(
         # Show stats
         stats = vector_store.get_stats()
         console.print(f"[green]Total documents in store: {stats['total_documents']}[/green]")
+
+        # Run validation
+        console.print("\n[yellow]Validating index...[/yellow]")
+        validator = IndexValidator(vector_store=vector_store)
+        validation = validator.validate_indexing(version=version)
+        
+        if validation["valid"]:
+            console.print("[green]✓ Index validation passed[/green]")
+        else:
+            console.print(f"[yellow]⚠ Index validation found {validation['issue_count']} issues[/yellow]")
+            if validation["issues"]:
+                console.print("[yellow]Sample issues:[/yellow]")
+                for issue in validation["issues"][:5]:
+                    console.print(f"  - {issue}")
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -219,8 +237,19 @@ def index(
     type=float,
     help="LLM temperature (0.0-1.0)",
 )
-def query(question: str, version: str, top_k: int, show_sources: bool, temperature: float):
-    """Query Laravel documentation."""
+@click.option(
+    "--min-similarity",
+    default=None,
+    type=float,
+    help="Minimum similarity threshold (0.0-1.0)",
+)
+@click.option(
+    "--no-verify",
+    is_flag=True,
+    help="Disable answer verification",
+)
+def query(question: str, version: str, top_k: int, show_sources: bool, temperature: float, min_similarity: float, no_verify: bool):
+    """Query Laravel documentation with verification."""
     console.print(Panel(f"[bold cyan]Question:[/bold cyan] {question}"))
 
     try:
@@ -239,11 +268,33 @@ def query(question: str, version: str, top_k: int, show_sources: bool, temperatu
                 version_filter=version,
                 include_sources=show_sources,
                 temperature=temperature,
+                min_similarity=min_similarity,
+                verify_answer=not no_verify,
             )
 
         # Display answer
         console.print("\n[bold green]Answer:[/bold green]")
         console.print(Panel(Markdown(response["answer"])))
+
+        # Display verification status
+        if response.get("verified") is not None:
+            verified = response["verified"]
+            status = response.get("verification_status", "unknown")
+            status_color = "green" if verified else "yellow" if status == "insufficient_context" else "red"
+            status_icon = "✓" if verified else "✗"
+            console.print(f"\n[bold {status_color}]{status_icon} Verification:[/bold {status_color}] {status}")
+
+        # Display similarity scores
+        if response.get("similarity_scores"):
+            scores = response["similarity_scores"]
+            avg_score = sum(scores) / len(scores) if scores else 0
+            console.print(f"[cyan]Average Similarity:[/cyan] {avg_score:.3f}")
+            console.print(f"[cyan]Similarity Scores:[/cyan] {', '.join(f'{s:.3f}' for s in scores)}")
+
+        # Display cache status
+        if response.get("cache_hit") is not None:
+            cache_status = "Hit" if response["cache_hit"] else "Miss"
+            console.print(f"[dim]Cache:[/dim] {cache_status}")
 
         # Display sources if requested
         if show_sources and "sources" in response:
@@ -252,14 +303,18 @@ def query(question: str, version: str, top_k: int, show_sources: bool, temperatu
             table.add_column("File", style="cyan")
             table.add_column("Section", style="green")
             table.add_column("Version", style="yellow")
+            table.add_column("Similarity", style="green")
             table.add_column("Distance", style="red")
 
             for source in response["sources"]:
+                similarity = source.get("similarity", source.get("distance", 0))
+                distance = source.get("distance", 0)
                 table.add_row(
                     source["file"],
                     source["section"],
                     source["version"],
-                    f"{source['distance']:.4f}",
+                    f"{similarity:.3f}" if isinstance(similarity, (int, float)) else "N/A",
+                    f"{distance:.4f}" if distance else "N/A",
                 )
 
             console.print(table)
@@ -296,6 +351,17 @@ def stats(version: str):
                 table.add_row(ver, str(count))
 
             console.print(table)
+
+        # Display cache statistics
+        cache_stats = get_cache_stats()
+        if cache_stats:
+            console.print("\n[bold blue]Cache Statistics[/bold blue]")
+            for cache_type, stats in cache_stats.items():
+                console.print(f"\n[cyan]{cache_type.title()} Cache:[/cyan]")
+                console.print(f"  Size: {stats['size']}/{stats['max_size']}")
+                console.print(f"  Hits: {stats['hits']}, Misses: {stats['misses']}")
+                console.print(f"  Hit Rate: {stats['hit_rate']}%")
+                console.print(f"  TTL: {stats['ttl']}s")
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -382,6 +448,56 @@ def check(version: str):
             console.print(f"[green]✓ Documentation found: {len(files)} files[/green]")
         else:
             console.print(f"[red]✗ Documentation not found for version {version}[/red]")
+
+
+@cli.command()
+@click.option(
+    "--version",
+    help="Validate specific version",
+)
+def validate(version: str):
+    """Validate index health and quality."""
+    console.print("[bold blue]Index Validation[/bold blue]\n")
+
+    try:
+        validator = IndexValidator()
+        health = validator.check_index_health(version=version)
+
+        # Display health status
+        status = health.get("status", "unknown")
+        score = health.get("score", 0)
+        status_color = "green" if status == "healthy" else "yellow" if status == "degraded" else "red"
+        console.print(f"[bold {status_color}]Status:[/bold {status_color}] {status.upper()} (Score: {score}/100)")
+
+        console.print(f"\n[cyan]Total Documents:[/cyan] {health.get('total_documents', 0)}")
+
+        # Display version distribution
+        if health.get("version_distribution"):
+            console.print("\n[bold green]Version Distribution:[/bold green]")
+            for ver, count in health["version_distribution"].items():
+                console.print(f"  {ver}: {count} documents")
+
+        # Display issues
+        issues = health.get("issues", [])
+        if issues:
+            console.print(f"\n[yellow]Issues Found ({len(issues)}):[/yellow]")
+            for issue in issues[:10]:  # Show first 10
+                console.print(f"  - {issue}")
+
+        # Display validation details
+        validation = health.get("validation", {})
+        if validation:
+            stats = validation.get("stats", {})
+            console.print("\n[bold blue]Validation Details:[/bold blue]")
+            console.print(f"  Duplicates: {stats.get('duplicates', 0)}")
+            console.print(f"  Missing Metadata: {stats.get('missing_metadata', 0)}")
+            console.print(f"  Empty Chunks: {stats.get('empty_chunks', 0)}")
+            console.print(f"  Invalid Embeddings: {stats.get('invalid_embeddings', 0)}")
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        logger.error(f"Validation failed: {e}")
+        raise click.Abort()
 
 
 if __name__ == "__main__":

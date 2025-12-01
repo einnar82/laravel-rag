@@ -1,6 +1,7 @@
 """Parse Markdown files and extract sections based on H2 headings."""
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -172,11 +173,12 @@ class MarkdownParser:
         logger.debug(f"Extracted {len(sections)} sections from {file_name} (strategy: {self.chunk_strategy})")
         return sections
 
-    def parse_directory(self, docs_dir: Path) -> list[DocSection]:
-        """Parse all Markdown files in a directory.
+    def parse_directory(self, docs_dir: Path, max_workers: int = 8) -> list[DocSection]:
+        """Parse all Markdown files in a directory using concurrent processing.
 
         Args:
             docs_dir: Directory containing Markdown files
+            max_workers: Maximum number of concurrent workers
 
         Returns:
             List of all DocSection objects from all files
@@ -195,15 +197,26 @@ class MarkdownParser:
             excluded_names = [f.name for f in all_markdown_files if f.name.lower() in self.EXCLUDED_FILES]
             logger.debug(f"Excluding {excluded_count} non-documentation files: {', '.join(excluded_names)}")
 
-        logger.info(f"Parsing {len(markdown_files)} Markdown files...")
+        logger.info(f"Parsing {len(markdown_files)} Markdown files with {max_workers} workers...")
 
-        for file_path in markdown_files:
-            try:
-                sections = self.parse_file(file_path)
-                all_sections.extend(sections)
-            except Exception as e:
-                logger.error(f"Error parsing {file_path}: {e}")
-                continue
+        # Use ThreadPoolExecutor for concurrent file parsing
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all parsing tasks
+            future_to_file = {
+                executor.submit(self.parse_file, file_path): file_path
+                for file_path in markdown_files
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_file):
+                file_path = future_to_file[future]
+                try:
+                    sections = future.result()
+                    all_sections.extend(sections)
+                    logger.debug(f"Parsed {file_path.name}: {len(sections)} sections")
+                except Exception as e:
+                    logger.error(f"Error parsing {file_path}: {e}")
+                    continue
 
         logger.info(f"Total sections extracted: {len(all_sections)}")
         return all_sections
@@ -270,10 +283,13 @@ class MarkdownParser:
                 chunks.append(chunk.strip())
 
                 # Move position forward, accounting for overlap
-                current_pos += len(chunk) - self.chunk_overlap
+                # Ensure we always move forward to avoid infinite loop
+                advance_by = max(len(chunk) - self.chunk_overlap, 1)
+                current_pos += advance_by
             else:
                 # Chunk too small, include more content
-                current_pos = chunk_end
+                # Ensure we always move forward
+                current_pos = max(chunk_end, current_pos + 1)
 
         logger.debug(f"Split into {len(chunks)} chunks")
         return chunks if chunks else [content]

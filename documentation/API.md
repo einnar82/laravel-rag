@@ -57,7 +57,9 @@ Query Laravel documentation with LLM-generated response.
   "version": "12",                    // Optional: filter by version
   "top_k": 5,                        // Optional: number of results
   "temperature": 0.7,                // Optional: LLM temperature
-  "include_sources": true            // Optional: include source docs
+  "include_sources": true,           // Optional: include source docs
+  "min_similarity": 0.5,             // Optional: minimum similarity threshold (0.0-1.0)
+  "verify_answer": true              // Optional: verify answer against context (default: true)
 }
 ```
 
@@ -67,6 +69,10 @@ Query Laravel documentation with LLM-generated response.
   "question": "How do I create an Eloquent model?",
   "answer": "To create an Eloquent model in Laravel, you can use the `php artisan make:model` command...",
   "version_filter": "12",
+  "verified": true,
+  "verification_status": "verified",
+  "similarity_scores": [0.856, 0.823, 0.801, 0.789, 0.765],
+  "cache_hit": false,
   "sources": [
     {
       "file": "eloquent.md",
@@ -74,7 +80,8 @@ Query Laravel documentation with LLM-generated response.
       "version": "12",
       "anchor": "eloquent.md#defining-models",
       "heading_path": "Eloquent ORM > Defining Models",
-      "distance": 0.234
+      "distance": 0.144,
+      "similarity": 0.856
     }
   ]
 }
@@ -97,6 +104,14 @@ curl -X POST http://localhost:8000/query \
 - `top_k` (optional, default: 5): Number of relevant sections to retrieve (1-20)
 - `temperature` (optional, default: 0.7): LLM sampling temperature (0.0-1.0)
 - `include_sources` (optional, default: false): Include source documents in response
+- `min_similarity` (optional, default: 0.5): Minimum similarity threshold (0.0-1.0). Only results above this threshold will be used
+- `verify_answer` (optional, default: true): Whether to verify the answer is supported by retrieved context
+
+**Response Fields**:
+- `verified` (boolean): Whether the answer was verified against context
+- `verification_status` (string): Status of verification ("verified", "unverified", "insufficient_context", "verification_failed")
+- `similarity_scores` (array): Similarity scores for retrieved documents
+- `cache_hit` (boolean): Whether the result was served from cache
 
 **Status Codes**:
 - `200 OK`: Successful query
@@ -161,7 +176,25 @@ Retrieve vector store statistics.
     "12": 150
   },
   "collection_name": "laravel_docs",
-  "persist_dir": "/app/chromadb"
+  "persist_dir": "/app/chromadb",
+  "cache_stats": {
+    "embedding": {
+      "size": 45,
+      "max_size": 1000,
+      "hits": 234,
+      "misses": 45,
+      "hit_rate": 83.87,
+      "ttl": 3600
+    },
+    "retrieval": {
+      "size": 123,
+      "max_size": 1000,
+      "hits": 567,
+      "misses": 123,
+      "hit_rate": 82.17,
+      "ttl": 3600
+    }
+  }
 }
 ```
 
@@ -207,6 +240,102 @@ curl http://localhost:8000/versions
 **Status Codes**:
 - `200 OK`: Versions retrieved successfully
 - `500 Internal Server Error`: Failed to retrieve versions
+
+---
+
+### 6. Validate Index
+
+Validate index health and quality.
+
+**Endpoint**: `GET /validate-index`
+
+**Query Parameters**:
+- `version` (optional): Validate specific version
+
+**Response**:
+```json
+{
+  "status": "healthy",
+  "score": 95,
+  "total_documents": 150,
+  "version_distribution": {
+    "12": 150
+  },
+  "issues": [],
+  "validation": {
+    "valid": true,
+    "issue_count": 0,
+    "stats": {
+      "total_documents": 150,
+      "duplicates": 0,
+      "missing_metadata": 0,
+      "empty_chunks": 0,
+      "invalid_embeddings": 0
+    }
+  }
+}
+```
+
+**Example**:
+```bash
+curl "http://localhost:8000/validate-index?version=12"
+```
+
+**Status Codes**:
+- `200 OK`: Validation completed successfully
+- `500 Internal Server Error`: Validation failed
+
+**Health Status Values**:
+- `healthy`: Score >= 80, no critical issues
+- `degraded`: Score 50-79, some issues found
+- `unhealthy`: Score < 50, critical issues found
+
+---
+
+### 7. Get Cache Statistics
+
+Get cache statistics for embeddings and retrieval results.
+
+**Endpoint**: `GET /cache-stats`
+
+**Response**:
+```json
+{
+  "embedding": {
+    "size": 45,
+    "max_size": 1000,
+    "hits": 234,
+    "misses": 45,
+    "hit_rate": 83.87,
+    "ttl": 3600
+  },
+  "retrieval": {
+    "size": 123,
+    "max_size": 1000,
+    "hits": 567,
+    "misses": 123,
+    "hit_rate": 82.17,
+    "ttl": 3600
+  }
+}
+```
+
+**Example**:
+```bash
+curl http://localhost:8000/cache-stats
+```
+
+**Status Codes**:
+- `200 OK`: Cache statistics retrieved successfully
+- `500 Internal Server Error`: Failed to retrieve cache statistics
+
+**Cache Statistics Fields**:
+- `size`: Current number of cached items
+- `max_size`: Maximum cache size
+- `hits`: Number of cache hits
+- `misses`: Number of cache misses
+- `hit_rate`: Cache hit rate percentage
+- `ttl`: Time to live in seconds
 
 ---
 
@@ -271,12 +400,26 @@ X-RateLimit-Reset: 1609459200
 - `7-10`: Broad queries, need comprehensive context
 - `11+`: Research queries, exploring multiple aspects
 
+### Similarity Threshold
+
+- `0.0-0.3`: Very permissive, may include less relevant results
+- `0.4-0.6`: Balanced (default: 0.5), good for most queries
+- `0.7-0.9`: Strict, only highly relevant results
+- `0.9+`: Very strict, only near-exact matches
+
+### Answer Verification
+
+- `verify_answer: true` (default): Verifies answer is supported by context, prevents hallucination
+- `verify_answer: false`: Skips verification for faster responses (not recommended)
+
 ### Performance Optimization
 
 1. **Batch Queries**: Group related questions
-2. **Cache Results**: Cache frequently asked questions
+2. **Cache Results**: Embeddings and retrieval results are automatically cached
 3. **Use Search First**: Use `/search` for exploratory queries, `/query` for answers
 4. **Version Filtering**: Filter by version when possible
+5. **Similarity Threshold**: Adjust `min_similarity` to balance relevance vs. coverage
+6. **Monitor Cache**: Check `/cache-stats` to monitor cache performance
 
 ---
 
@@ -345,7 +488,7 @@ queryDocs("How do I create a controller?")
 ### cURL
 
 ```bash
-# Query with all options
+# Query with all options including verification
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
   -d '{
@@ -353,8 +496,16 @@ curl -X POST http://localhost:8000/query \
     "version": "12",
     "top_k": 5,
     "temperature": 0.7,
-    "include_sources": true
+    "include_sources": true,
+    "min_similarity": 0.6,
+    "verify_answer": true
   }' | jq
+
+# Validate index
+curl "http://localhost:8000/validate-index?version=12" | jq
+
+# Get cache statistics
+curl http://localhost:8000/cache-stats | jq
 
 # Search
 curl "http://localhost:8000/search?q=validation&top_k=3" | jq

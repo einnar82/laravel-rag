@@ -1,6 +1,6 @@
 .PHONY: help quickstart docker-start docker-stop docker-logs clean
-.PHONY: extract index query stats check disk-usage
-.PHONY: local-extract local-index local-query local-stats local-check
+.PHONY: extract index validate query stats check disk-usage
+.PHONY: local-extract local-index local-query local-stats local-check local-validate
 .PHONY: analyze-chunks compare-chunks
 
 help:
@@ -19,6 +19,7 @@ help:
 	@echo "📚 Documentation Workflow:"
 	@echo "  make extract                 Extract Laravel docs from GitHub"
 	@echo "  make index                   Index docs into vector store"
+	@echo "  make validate                Validate index health and quality"
 	@echo "  make query Q='...'           Query documentation"
 	@echo "  make stats                   Show database statistics"
 	@echo "  make check                   Check system status"
@@ -64,6 +65,10 @@ quickstart:
 	@docker compose exec -T rag-app python -m src.cli.main index --version 12
 	@echo "✓ Documentation indexed"
 	@echo ""
+	@echo "Step 6/6: Validating index..."
+	@docker compose exec -T rag-app python -m src.cli.main validate --version 12 || true
+	@echo "✓ Validation complete"
+	@echo ""
 	@echo "╔════════════════════════════════════════════════════════════╗"
 	@echo "║  ✅ Setup Complete! Your RAG system is ready to use       ║"
 	@echo "╚════════════════════════════════════════════════════════════╝"
@@ -73,6 +78,9 @@ quickstart:
 	@echo ""
 	@echo "View statistics:"
 	@echo "  make stats"
+	@echo ""
+	@echo "Validate index:"
+	@echo "  make validate"
 	@echo ""
 
 # ============================================================================
@@ -105,8 +113,8 @@ extract:
 	@docker compose exec rag-app python -m src.cli.main extract --version 12
 	@echo "✓ Extraction complete"
 
-index:
-	@echo "Indexing documentation into vector store..."
+index: ## Index documentation with concurrent processing
+	@echo "Indexing documentation into vector store (concurrent processing enabled)..."
 	@docker compose exec rag-app python -m src.cli.main index --version 12
 	@echo "✓ Indexing complete"
 
@@ -123,6 +131,9 @@ stats:
 
 check:
 	@docker compose exec rag-app python -m src.cli.main check
+
+validate:
+	@docker compose exec rag-app python -m src.cli.main validate
 
 # ============================================================================
 # Local Development (No Docker)
@@ -160,6 +171,9 @@ local-stats:
 
 local-check:
 	@. .venv/bin/activate && python -m src.cli.main check
+
+local-validate:
+	@. .venv/bin/activate && python -m src.cli.main validate
 
 # ============================================================================
 # Utilities

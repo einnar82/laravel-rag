@@ -19,11 +19,19 @@ vector_store:
   persist_directory: ./chromadb
   collection_name: laravel_docs
   distance_metric: cosine
+  # HNSW Index Parameters for faster approximate nearest neighbor search
+  hnsw:
+    M: 16  # Number of bi-directional links for each node
+    ef_construction: 200  # Size of dynamic candidate list during construction
+    ef_search: 50  # Size of dynamic candidate list during search
+  # Enable metadata indexing for faster filtering
+  metadata_indexing: true
 
 # RAG Configuration
 rag:
   top_k: 5
   min_similarity: 0.5
+  min_similarity_threshold: 0.2  # Minimum similarity score to generate answer
   max_context_length: 4000
   context_window: 8192
 
@@ -55,6 +63,19 @@ performance:
   request_timeout: 30
   embedding_batch_size: 50
   cache_ttl: 3600
+  # Concurrency configuration
+  concurrency:
+    enabled: true  # Enable concurrent processing by default
+    max_workers: 8  # Maximum number of concurrent workers for file parsing
+    embedding_workers: 4  # Workers for concurrent embedding generation
+    batch_processing: true  # Enable batch processing for embeddings
+  # Cache configuration
+  cache:
+    enabled: true
+    ttl: 3600  # Time to live in seconds
+    max_size: 1000  # Maximum number of cached items
+    embedding_cache: true  # Cache query embeddings
+    retrieval_cache: true  # Cache retrieval results
 
 # Logging
 logging:

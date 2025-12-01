@@ -6,6 +6,7 @@ from typing import List
 import ollama
 
 from src.config import settings
+from src.utils.cache import get_embedding_cache
 from src.utils.logger import app_logger as logger
 
 
@@ -26,6 +27,8 @@ class OllamaEmbeddings:
         self.model = model or settings.embedding_model
         self.base_url = base_url or settings.ollama_host
         self.client = ollama.Client(host=self.base_url)
+        self._cached_model = None  # Track model for cache invalidation
+        self.embedding_cache = get_embedding_cache()
 
         logger.info(f"Initialized Ollama embeddings with model: {self.model}")
 
@@ -112,7 +115,7 @@ class OllamaEmbeddings:
         return embeddings
 
     def embed_query(self, text: str) -> List[float]:
-        """Generate embedding for a single query.
+        """Generate embedding for a single query with caching.
 
         Args:
             text: Query text to embed
@@ -124,13 +127,30 @@ class OllamaEmbeddings:
             You may see warnings from Ollama about token handling. These are
             harmless and can be ignored.
         """
+        # Check if model changed (invalidate cache)
+        if self._cached_model != self.model:
+            self.embedding_cache.clear()
+            self._cached_model = self.model
+            logger.info(f"Model changed to {self.model}, embedding cache cleared")
+
+        # Check cache first
+        cached_embedding = self.embedding_cache.get(text)
+        if cached_embedding is not None:
+            return cached_embedding
+
+        # Generate embedding
         try:
             # Note: Ollama may emit harmless warnings about token handling
             response = self.client.embeddings(
                 model=self.model,
                 prompt=text,
             )
-            return response["embedding"]
+            embedding = response["embedding"]
+
+            # Cache the embedding
+            self.embedding_cache.set(text, embedding)
+
+            return embedding
         except Exception as e:
             logger.error(f"Error generating query embedding: {e}")
             return [0.0] * 768  # Return zero vector on error
@@ -145,7 +165,20 @@ class OllamaEmbeddings:
             models = self.client.list()
             available_models = [m["name"] for m in models.get("models", [])]
 
+            # Check for exact match or with :latest tag
+            model_found = False
             if self.model in available_models:
+                model_found = True
+            elif f"{self.model}:latest" in available_models:
+                model_found = True
+                logger.info(f"Model {self.model} found as {self.model}:latest")
+            elif any(m.startswith(f"{self.model}:") for m in available_models):
+                # Check if model exists with any tag
+                model_found = True
+                matching = [m for m in available_models if m.startswith(f"{self.model}:")]
+                logger.info(f"Model {self.model} found as {matching[0]}")
+
+            if model_found:
                 logger.info(f"Model {self.model} is available")
                 return True
             else:

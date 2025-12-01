@@ -11,8 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.config import settings
+from src.indexing.validator import IndexValidator
 from src.indexing.vector_store import VectorStore
 from src.retrieval.rag_chain import RAGChain
+from src.utils.cache import get_cache_stats
 from src.utils.logger import app_logger as logger
 
 # Global instances
@@ -70,6 +72,8 @@ class QueryRequest(BaseModel):
     top_k: Optional[int] = Field(None, description="Number of results to retrieve", ge=1, le=20)
     temperature: Optional[float] = Field(0.7, description="LLM temperature", ge=0.0, le=1.0)
     include_sources: bool = Field(False, description="Include source documents in response")
+    min_similarity: Optional[float] = Field(None, description="Minimum similarity threshold", ge=0.0, le=1.0)
+    verify_answer: bool = Field(True, description="Verify answer against context")
 
 
 class SourceDocument(BaseModel):
@@ -80,7 +84,8 @@ class SourceDocument(BaseModel):
     version: str
     anchor: str
     heading_path: str
-    distance: float
+    distance: Optional[float] = None
+    similarity: Optional[float] = None
 
 
 class QueryResponse(BaseModel):
@@ -90,6 +95,10 @@ class QueryResponse(BaseModel):
     answer: str
     version_filter: Optional[str]
     sources: Optional[List[SourceDocument]] = None
+    verified: Optional[bool] = None
+    verification_status: Optional[str] = None
+    similarity_scores: Optional[List[float]] = None
+    cache_hit: Optional[bool] = None
 
 
 class StatsResponse(BaseModel):
@@ -99,6 +108,7 @@ class StatsResponse(BaseModel):
     versions: dict
     collection_name: str
     persist_dir: str
+    cache_stats: Optional[dict] = None
 
 
 class HealthResponse(BaseModel):
@@ -144,23 +154,25 @@ async def health_check():
 
 @app.post("/query", response_model=QueryResponse, tags=["Query"])
 async def query_documentation(request: QueryRequest):
-    """Query Laravel documentation.
+    """Query Laravel documentation with verification.
 
     Args:
         request: Query request with question and parameters
 
     Returns:
-        QueryResponse with answer and optional sources
+        QueryResponse with answer, verification status, and optional sources
     """
     try:
         logger.info(f"Received query: {request.question}")
 
-        # Execute query
+        # Execute query with verification
         response = rag_chain.query(
             question=request.question,
             version_filter=request.version,
             include_sources=request.include_sources,
             temperature=request.temperature,
+            min_similarity=request.min_similarity,
+            verify_answer=request.verify_answer,
         )
 
         # Convert to response model
@@ -180,6 +192,9 @@ async def get_stats():
     """
     try:
         stats = vector_store.get_stats()
+        # Add cache stats to response
+        cache_stats = get_cache_stats()
+        stats["cache_stats"] = cache_stats
         return StatsResponse(**stats)
 
     except Exception as e:
@@ -260,6 +275,42 @@ async def get_versions():
     except Exception as e:
         logger.error(f"Version retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get versions: {str(e)}")
+
+
+@app.get("/validate-index", tags=["Statistics"])
+async def validate_index(version: Optional[str] = Query(None, description="Filter by version")):
+    """Validate index health and quality.
+
+    Args:
+        version: Optional version to validate
+
+    Returns:
+        Index validation results
+    """
+    try:
+        validator = IndexValidator(vector_store=vector_store)
+        health = validator.check_index_health(version=version)
+        return health
+
+    except Exception as e:
+        logger.error(f"Index validation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
+
+@app.get("/cache-stats", tags=["Statistics"])
+async def get_cache_stats():
+    """Get cache statistics.
+
+    Returns:
+        Cache statistics for embeddings and retrieval
+    """
+    try:
+        stats = get_cache_stats()
+        return stats
+
+    except Exception as e:
+        logger.error(f"Cache stats retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get cache stats: {str(e)}")
 
 
 if __name__ == "__main__":
